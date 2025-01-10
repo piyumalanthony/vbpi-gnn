@@ -19,7 +19,7 @@ def init(tree, branch=None, name='all', scale=0.1, display=False, return_map=Fal
         else:
             node.name, j = j, j+1
         if not node.is_root():
-            if isinstance(branch, basestring) and branch =='random':
+            if isinstance(branch, str) and branch =='random':
                 node.dist = np.random.exponential(scale)
             elif branch is not None:
                 node.dist = branch[node.name]

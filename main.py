@@ -72,6 +72,8 @@ ufboot_support_path = 'data/ufboot_data_DS1-11/'
 data_path = 'data/hohna_datasets_fasta/'
 ground_truth_path, samp_size = 'data/raw_data_DS1-11/', 750001
 
+mcmc_support_path = 'data/mcmc_data_DS1-11/'
+
 ###### Load Data
 print('\nLoading Data set: {} ......'.format(args.dataset))
 run_time = -time.time()

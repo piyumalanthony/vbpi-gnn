@@ -68,6 +68,8 @@ class SBN(nn.Module):
             self.CPDParser.add_item(split)
         self.CPDParser.add_dict('rootsplit', record_name=False)
         self.rs_len = len(self.rootsplit_supp_dict)
+
+        # print(self.CPDParser.start_and_end)
                 
         ss_mask, ss_max_len = [], 0
         for parent in self.subsplit_supp_dict:
@@ -78,12 +80,19 @@ class SBN(nn.Module):
                 self.CPDParser.add_dict(parent)
                 ss_mask.append(torch.ones(ss_len, dtype=torch.uint8))
                 ss_max_len = max(ss_max_len, ss_len)
+
+        # print("\n")
+        # print(self.CPDParser.start_and_end)
                         
         self.ss_mask = torch.stack([F.pad(mask, (0, ss_max_len - mask.size(0)), 'constant', 0) for mask in ss_mask], dim=0)
+        # self.ss_mask = self.ss_mask.bool()
         
                 
         self.CPD_params = nn.Parameter(torch.zeros(self.CPDParser.num_params), requires_grad=True)
+
+        # print("CPDParser num_params:", self.CPDParser.num_params)
         self.idx_map = np.append(np.arange(self.CPDParser.num_params), [-2,-1])
+        # print("idx_map:", self.idx_map)
         
         # self.rs = nn.Parameter(torch.zeros(len(self.rootsplit_supp_dict)), requires_grad=True)
         # self.rs_CPDs = F.softmax(self.rs, 0)
@@ -107,6 +116,10 @@ class SBN(nn.Module):
         
         # self.CPDs = torch.cat((self.rs_CPDs, self.update_subsplit_CPDs()))
         ss_CPDs, self.ss_masked_CPDs = self.update_subsplit_CPDs()
+
+        # print("ss_CPDs:", ss_CPDs)
+        # print("ss_masked_CPDs:", self.ss_masked_CPDs)
+
         self.CPDs = torch.cat((self.rs_CPDs, ss_CPDs))
         self.one_tensor = torch.tensor([1.0])
             
@@ -117,12 +130,18 @@ class SBN(nn.Module):
             raise Exception('Invalid rootsplit probability! Check self.rs:(max {:.4f}, min {:.4f})'.format(np.max(self.rs.detach().numpy()), np.min(self.rs.detach().numpy())))
         
     def update_subsplit_CPDs(self):
+        # ToDO: Here the code is updated to remove depreicated code which does not support masks except boo.
         temp_mat = torch.zeros(self.ss_mask.size())
-        temp_mat.masked_scatter_(self.ss_mask, self.CPD_params[self.rs_len:])
-        masked_temp_mat = temp_mat.masked_fill(1-self.ss_mask, -float('inf'))
+        temp_mat.masked_scatter_(self.ss_mask.to(torch.bool), self.CPD_params[self.rs_len:])
+        masked_temp_mat = temp_mat.masked_fill((1-self.ss_mask).to(torch.bool), -float('inf'))
         masked_CPDs = F.softmax(masked_temp_mat, dim=1)
+
+        # print("CPDs:", masked_CPDs)
+        # print("mask ss:", self.ss_mask)
+        #
+        # print("mask out ss:", masked_CPDs.masked_select(self.ss_mask.to(torch.bool)))
         
-        return masked_CPDs.masked_select(self.ss_mask), masked_CPDs
+        return masked_CPDs.masked_select(self.ss_mask.to(torch.bool)), masked_CPDs
         
     
     def update_CPDs(self):
@@ -180,17 +199,21 @@ class SBN(nn.Module):
                 split_prob = self.get_subsplit_CPDs(split_bitarr)
                 # split = self.ss_reverse_map[split_bitarr][np.random.choice(len(split_prob), p=split_prob)]
                 split = self.ss_reverse_map[split_bitarr][torch.multinomial(split_prob, 1).item()]
- 
+
+            # Note: give the other clade or bipartition
             comp_split = (parent_clade_bitarr ^ bitarray(split)).to01()
             
             c1 = node.add_child()
             c2 = node.add_child()
+            ## Note: Add for next iteration to further get subsplits
             if split.count('1') > 1:
                 node_split_stack.append((c1, comp_split + split))
             else:
                 c1.name = self.taxa[split.find('1')]
                 c1.clade_bitarr = bitarray(split)
                 c1.split_bitarr = min([c1.clade_bitarr, ~c1.clade_bitarr]).to01()
+            ## Note: This is other subsplit to consider given the parent. This works because as we take parent_clade_bitarr = bitarray(split_bitarr[self.ntaxa:])
+            ## which is always second half of the bitarray
             if comp_split.count('1') > 1:
                 node_split_stack.append((c2, split + comp_split))
             else:
@@ -209,7 +232,8 @@ class SBN(nn.Module):
         Traverse the tree topology to grab the indices for parent-child subsplit pairs (PCSPs).
         This is a two-pass algorithm that enjoys a linear time complexity.
         
-        """       
+        """
+        # Note: This is needed as the we need specific subsplits that are available in a given tree.
         for node in tree.traverse("postorder"):
             if not node.is_root():
                 node.leaf_to_root_subsplit_idxes = []
@@ -289,9 +313,13 @@ class SBN(nn.Module):
     def forward(self, tree, return_idxes_list=False):
         subsplit_idxes_list = self.grab_subsplit_idxes(tree)
 
+        # Note: For CPDs torch.tensor([1.0, 0.0]) added to represent all taxa root and its complement for a rooted tree
         CPDs = torch.cat((self.CPDs, torch.tensor([1.0, 0.0])))
         mapped_idxes_list = torch.LongTensor(subsplit_idxes_list)
-        
+
+        # Note; logsumexp first exponenciate and then take the sum. This is equal to taking the sum of CPDs
+        # This is a rooted tree where all the rootsplit summation should be calculated and sum-up for ll
+        # Note: If you need clarification run sbn_param_check.py for process.
         if not return_idxes_list:
             return CPDs[mapped_idxes_list].clamp(1e-06).log().sum(1).logsumexp(0)
         else:

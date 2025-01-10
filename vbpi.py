@@ -69,7 +69,9 @@ class VBPI(nn.Module):
 
                 logll = torch.stack([self.phylo_model.loglikelihood(log_branch, tree) for log_branch, tree in zip(*[samp_log_branch, samp_trees])])
                 logp_prior = self.phylo_model.logprior(samp_log_branch)
-                logq_tree = torch.stack([self.logq_tree(tree) for tree in samp_trees])       
+                logq_tree = torch.stack([self.logq_tree(tree) for tree in samp_trees])
+
+                # Note; ElBO := log(p(x|q,tau)p(q|tau)p(tau)/Q(q|tau)Q(tau))
                 lower_bounds.append(torch.logsumexp(logll + logp_prior - logq_tree - logq_branch + self.log_p_tau - math.log(n_particles), 0))            
             
             lower_bound = torch.stack(lower_bounds).mean()
@@ -107,9 +109,13 @@ class VBPI(nn.Module):
         
         l_signal = logp_joint - logq_tree - logq_branch
         mean_exclude_signal = (torch.sum(l_signal) - l_signal) / (n_particles-1.)
+        ## Note: Please study more on this!
         control_variates = torch.logsumexp(l_signal.view(-1,1).repeat(1, n_particles) - l_signal.diag() + mean_exclude_signal.diag() - math.log(n_particles), dim=0)
         temp_lower_bound = torch.logsumexp(l_signal - math.log(n_particles), dim=0)
+        ## Note: Use detach to calculate the gradient only for logq_tree
         vimco_fake_term = torch.sum((temp_lower_bound - control_variates).detach() * logq_tree, dim=0)
+        # Note: Vimco fake term is used for gradients of tree topology and temp_lower_bound is used for gradient of branches
+        # therefore, loss = - temp_lower_bound - vimco_fake_term
         return temp_lower_bound, vimco_fake_term, lower_bound, torch.max(logll)
         
         
@@ -148,6 +154,7 @@ class VBPI(nn.Module):
             inverse_temp = min(1., init_inverse_temp + it * 1.0/warm_start_interval)
             if method == 'vimco':
                 temp_lower_bound, vimco_fake_term, lower_bound, logll = self.vimco_lower_bound(inverse_temp, n_particles)
+                # Note: the ELBO is a lower bound. To maximize it we need to multiply by (-1).
                 loss = - temp_lower_bound - vimco_fake_term
             elif method == 'rws':
                 temp_lower_bound, rws_fake_term, lower_bound, logll = self.rws_lower_bound(inverse_temp, n_particles)

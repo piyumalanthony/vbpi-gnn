@@ -1,0 +1,17 @@
+## Note: Bitarray representation of a node.
+
+For parent node: The representation has 2*n_tips representing two subsplits. bit_arr[:n_tips], bit_arr[n_tips:]
+For child subsplit: the bitarray only has n_tips number of bit, which is generally enough.
+
+## Note: Models for VBPI
+
+For the VBPI, two models are essential:
+
+Tree Model: SBN => keep track for root-splits and subsplits. Iteratively, update these during the learning algorithm.
+            Also used for sampling trees (n_particles) where used to calculate VIMCO estimator for variance reduction.
+            root-splits and  sub splits are converted to tensor parameters to be used in back-propagation.
+            The updated parameters are used iteratively.
+
+Branch-model: GNN or BaseModel which predict mu and sigma for branch length distribution.
+              Use parameterization trick for gradient calculation.
+

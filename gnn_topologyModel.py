@@ -57,7 +57,8 @@ class GNNModel(nn.Module):
             edge_index.append(neigh_idx_list)                
             node_features.append(node.d)
             node_idx_list.append(node.name)
-        
+
+        # Note: This is just to take indexes
         branch_idx_map = torch.sort(torch.LongTensor(node_idx_list), dim=0, descending=False)[1]
         # parent_idxes = torch.LongTensor(parent_idx_list)
         edge_index = torch.LongTensor(edge_index)

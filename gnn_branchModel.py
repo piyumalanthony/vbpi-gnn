@@ -83,5 +83,7 @@ class GNNModel(nn.Module):
         mean, std = zip(*map(lambda x: self.mean_std(x), tree_list))
         mean, std = torch.stack(mean, dim=0), torch.stack(std, dim=0)
         samp_log_branch, logq_branch = self.sample_branch_base(len(tree_list))
+        ## Note: This is parameterization trick in variational auto-encoder
+        ## Note: Branch length samples comes from a log-normal distribution
         samp_log_branch, logq_branch = samp_log_branch * std.exp() + mean - 2.0, logq_branch - torch.sum(std, -1)
         return samp_log_branch, logq_branch 
