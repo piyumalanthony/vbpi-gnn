@@ -61,8 +61,15 @@ class SBN(nn.Module):
         self.toBitArr = BitArray(taxa)
         self.rootsplit_supp_dict = rootsplit_supp_dict
         self.subsplit_supp_dict = subsplit_supp_dict
-        
-        
+
+        print("Rootsplit support dict:", self.rootsplit_supp_dict)
+        print("Subsplit support dict:", self.subsplit_supp_dict)
+
+        # Note: rootsplit_supp_dict only has rootsplicts with the keys with size of n_tips
+        # Rootsplit support dict: OrderedDict([('011111', 3.0), ('010000', 3.0), ('001111', 2.0), ('001110', 1.0), ('000001', 3.0),...
+        # Note: subsplit_supp_dict has two kind of keys. 1. parent key (size of 2*n_tips) 2. child key (size of n_tips)
+        # Subsplit support dict: OrderedDict([('100000011111', OrderedDict([('001111', 2.0), ('001000', 1.0)])), ('010000101111', OrderedDict([('001111', 2.0), ('000110', 1.0)])), ....
+
         self.CPDParser = ParamParser()
         for split in self.rootsplit_supp_dict:
             self.CPDParser.add_item(split)
@@ -81,8 +88,8 @@ class SBN(nn.Module):
                 ss_mask.append(torch.ones(ss_len, dtype=torch.uint8))
                 ss_max_len = max(ss_max_len, ss_len)
 
-        # print("\n")
-        # print(self.CPDParser.start_and_end)
+        print("\n")
+        print("CPD parser:", self.CPDParser.start_and_end)
                         
         self.ss_mask = torch.stack([F.pad(mask, (0, ss_max_len - mask.size(0)), 'constant', 0) for mask in ss_mask], dim=0)
         # self.ss_mask = self.ss_mask.bool()
@@ -136,6 +143,12 @@ class SBN(nn.Module):
         masked_temp_mat = temp_mat.masked_fill((1-self.ss_mask).to(torch.bool), -float('inf'))
         masked_CPDs = F.softmax(masked_temp_mat, dim=1)
 
+        print("Inside update subsplits function")
+        print("CPDs:",  self.CPD_params[self.rs_len:])
+        print("rslen:",self.rs_len)
+        print("ss_len:",self.CPD_params.size())
+        print("ss bool mask:", self.ss_mask.to(torch.bool))
+        print("CPDs:", self.CPD_params[self.rs_len:])
         # print("CPDs:", masked_CPDs)
         # print("mask ss:", self.ss_mask)
         #
@@ -166,6 +179,8 @@ class SBN(nn.Module):
             if self.CPDParser.check_item(ss_name):
                 node_subsplit_idxes.append(self.CPDParser.get_index(ss_name))
             else:
+                # Note: This is because as for a optimization, we don't include ss_len = 1 items in line 84 in init().
+                # Therefore, all probabilities for theses sub splits should be 1.
                 node_subsplit_idxes.append(-2)
                      
         
@@ -233,7 +248,22 @@ class SBN(nn.Module):
         This is a two-pass algorithm that enjoys a linear time complexity.
         
         """
+
+        """
+        Handling Bipartition Bit Arrays
+        
+        The bipartition bit arrays (clade_bitarr):
+        
+        Encode the evolutionary relationships between taxa.
+        Need to be combined and propagated differently in each direction:
+        Bottom-Up: Bipartitions are computed from children and propagated to the parent.
+        Top-Down: Bipartitions are derived from the parent and sibling relationships and passed to the children.
+        These computations are direction-dependent, necessitating two distinct passes.
+        
+        """
         # Note: This is needed as the we need specific subsplits that are available in a given tree.
+
+        # print("Inside grab_subsplit_idxes")
         for node in tree.traverse("postorder"):
             if not node.is_root():
                 node.leaf_to_root_subsplit_idxes = []
@@ -248,6 +278,8 @@ class SBN(nn.Module):
                         comb_parent_bipart_bitarr = node.get_sisters()[0].clade_bitarr + node.clade_bitarr
                         ss_parent, ss_child = comb_parent_bipart_bitarr.to01(), node.leaf_to_root_bipart_bitarr.to01()
                         self.node_subsplit_idxes_update(node.leaf_to_root_subsplit_idxes, ss_parent, ss_child)
+
+                # print(node.leaf_to_root_subsplit_idxes)
                         
         
         subsplit_idxes_list = []          
@@ -313,7 +345,8 @@ class SBN(nn.Module):
     def forward(self, tree, return_idxes_list=False):
         subsplit_idxes_list = self.grab_subsplit_idxes(tree)
 
-        # Note: For CPDs torch.tensor([1.0, 0.0]) added to represent all taxa root and its complement for a rooted tree
+        # Note: For CPDs torch.tensor([1.0, 0.0]) added to represent subsplits possibility exits in the parametrization given parent
+        # and subsplits not possible as the parent also does not exits. Refer to the node_subsplit_idxes_update() function.
         CPDs = torch.cat((self.CPDs, torch.tensor([1.0, 0.0])))
         mapped_idxes_list = torch.LongTensor(subsplit_idxes_list)
 
